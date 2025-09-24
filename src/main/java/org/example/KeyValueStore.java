@@ -7,67 +7,97 @@ import java.util.*;
  * Supports SET, GET, DELETE, KEYS, BEGIN, COMMIT, ROLLBACK.
  */
 public class KeyValueStore<K, V> {
-    // Global committed store
-    private final Map<K, V> store = new HashMap<>();
+    private final Map<K, V> store;
+    private final Stack<Transaction<K, V>> transactionStack;
 
-    // Stack of nested transactions
-    private final Stack<Transaction<K, V>> txStack = new Stack<>();
+    public KeyValueStore() {
+        this.transactionStack = new Stack<>();
+        this.store = new HashMap<>();
+    }
 
-    // ---------------- Core Operations ----------------
+    /**
+     * Sets the given key to the specified value.
+     * If inside an active transaction, the change is stored in the transaction.
+     */
     public void set(K key, V value) {
-        if (!txStack.isEmpty()) {
-            txStack.peek().getChanges().put(key, value);
+        if (!transactionStack.empty()) {
+            transactionStack.peek().getChanges().put(key, value);
         } else {
             store.put(key, value);
         }
     }
 
+    /**
+     * Returns the value for the given key.
+     * Checks active transactions first, then global store.
+     * Returns null if key does not exist.
+     */
     public V get(K key) {
-        for (Transaction<K, V> tx : txStack) {
-            if (tx.getChanges().containsKey(key)) {
-                return tx.getChanges().get(key);
+        for (Transaction<K, V> txn : transactionStack) {
+            if (txn.getChanges().containsKey(key)) {
+                return txn.getChanges().get(key);
             }
         }
         return store.get(key);
     }
 
+    /**
+     * Deletes the given key.
+     * If inside a active transaction, deletion only affects the transaction.
+     */
     public void delete(K key) {
-        if (!txStack.isEmpty()) {
-            txStack.peek().getChanges().remove(key);
-        } else {
-            store.remove(key);
+        if (!transactionStack.empty()) {
+            transactionStack.peek().getChanges().remove(key);
+            return;
         }
+        store.remove(key);
     }
 
+    /**
+     * Returns a list of all unique keys present, including keys in active transactions.
+     */
     public List<K> keys() {
-        Set<K> allKeys = new HashSet<>(store.keySet());
-        for (Transaction<K, V> tx : txStack) {
-            allKeys.addAll(tx.getChanges().keySet());
+        Set<K> keysSet = new HashSet<>(store.keySet());
+        for (Transaction<K, V> txn : transactionStack) {
+            keysSet.addAll(txn.getChanges().keySet());
         }
-        return new ArrayList<>(allKeys);
+        return new ArrayList<>(keysSet);
     }
 
     // ---------------- Transaction Operations ----------------
+
+    /**
+     * Begins a new transaction.
+     */
     public void begin() {
-        txStack.push(new Transaction<>());
+        Transaction<K, V> txn = new Transaction<>();
+        transactionStack.add(txn);
     }
 
+    /**
+     * Rolls back the most recent active transaction.
+     * If no transaction is active, does nothing.
+     */
     public void rollback() {
-        if (txStack.isEmpty()) return;
-        txStack.pop();
+        if (!transactionStack.empty()) {
+            transactionStack.pop();
+        }
     }
 
+    /**
+     * Commits the most recent active transaction.
+     * If nested, merges into parent transaction.
+     * If outermost, applies changes to the global store.
+     */
     public void commit() {
-        if (txStack.isEmpty()) return;
+        if (!transactionStack.empty()) {
+            Transaction<K, V> mostRecentActiveTransaction = transactionStack.pop();
 
-        Transaction<K, V> top = txStack.pop();
-
-        if (!txStack.isEmpty()) {
-            // Merge changes into parent transaction
-            txStack.peek().getChanges().putAll(top.getChanges());
-        } else {
-            // Apply to global store
-            store.putAll(top.getChanges());
+            if (!transactionStack.empty()) {
+                transactionStack.peek().getChanges().putAll(mostRecentActiveTransaction.getChanges());
+            } else {
+                store.putAll(mostRecentActiveTransaction.getChanges());
+            }
         }
     }
 }
