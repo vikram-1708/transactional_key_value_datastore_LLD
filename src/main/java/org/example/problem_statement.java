@@ -1,0 +1,57 @@
+/**
+ Problem Statement: Transactional In-Memory Key/Value Store
+
+ We have to build an in-memory key-value store that supports basic operations and,
+ can be extended to handle transactions and concurrent access.
+ The solution should be incrementally runnable, with test cases to demonstrate correctness.
+
+ 1. Core Operations
+
+ 1.1 Implement the command SET <key> <value>
+ a. Assign the given value to the specified key.
+ b. If the key already exists, update its value.
+
+ 1.2 Implement the command GET <key>
+ a. Return the value for the given key.
+ b. If the key does not exist, return "NULL".
+
+ 1.3 Implement the command DELETE <key>
+ a. Remove the given key from the store.
+ b. If the key does not exist, ignore.
+
+ 1.4 Implement the command KEYS <>
+ a. Return the all the keys present in the data store.
+ b. If no keys then return empty list.
+
+ 2. Follow-up 1: Transactional Operations
+
+ 2.1 Implement the command BEGIN
+ a. Start a new transaction. It creates a context for the other operations to happen.
+ b. Changes inside this transaction remain temporary until committed or rolled back.
+
+ 2.2 Implement the command ROLLBACK
+ a. Discard all changes made in the current (active) transaction.
+ b. If no transaction is active, return "No Active Transaction".
+
+ 2.3 Implement the command COMMIT
+ a. Save all changes made in the current (active) transaction and then end the transaction.
+ b. If nested, merge into the parent transaction; if outermost, persist to the global store.
+ c. If no transaction is active, return "No Active Transaction".
+
+ 2.4 Implement the command END
+ a. Exit the current transaction without saving any of its changes.
+ b. Equivalent in effect to ROLLBACK.
+
+ 2.4 Additional requirements for transactional operations:
+ a. Support nested transactions (multiple levels of BEGIN).
+ b. Ensure that rollbacks and commits only affect the current transaction context.
+
+ 3. Follow-up 2: Multi-threaded Operations
+
+ 3.1 Extend the key-value store to be thread-safe, allowing multiple clients to execute commands concurrently.
+
+ 3.2 Ensure correctness of transactions when multiple threads operate simultaneously.
+
+ 3.3 Prevent race conditions and maintain data consistency.
+ *
+ * */
