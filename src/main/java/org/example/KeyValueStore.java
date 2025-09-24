@@ -3,25 +3,35 @@ package org.example;
 import java.util.*;
 
 /**
- * Transactional In-Memory Key/Value Store with nested transactions.
- * Supports SET, GET, DELETE, KEYS, BEGIN, COMMIT, ROLLBACK.
+ * Thread-safe transactional in-memory key/value store with nested transactions.
+ *
+ * <p>Concurrency Summary:
+ * - The global store is a synchronizedMap (thread-safe for individual operations like get, put, remove).
+ * - Thread-local transaction stack ensures each thread maintains its own nested transactions, preventing interference between threads.
  */
 public class KeyValueStore<K, V> {
-    private final Map<K, V> store;
-    private final Stack<Transaction<K, V>> transactionStack;
 
-    public KeyValueStore() {
-        this.transactionStack = new Stack<>();
-        this.store = new HashMap<>();
-    }
+    /** Shared global store (thread-safe for individual operations) */
+    private final Map<K, V> store = Collections.synchronizedMap(new HashMap<>());
+
+    /** Thread-local stack for nested transactions per thread */
+    private final ThreadLocal<Stack<Transaction<K, V>>> transactionStack =
+            ThreadLocal.withInitial(Stack::new);
+
+    // ---------------- Core Operations ----------------
 
     /**
      * Sets the given key to the specified value.
-     * If inside an active transaction, the change is stored in the transaction.
+     * If inside a transaction, the change is stored in the thread-local transaction stack.
+     *
+     * Thread Safety:
+     * - Thread-local stack does not require synchronization.
+     * - Global store is thread-safe for individual put() operations.
      */
     public void set(K key, V value) {
-        if (!transactionStack.empty()) {
-            transactionStack.peek().getChanges().put(key, value);
+        Stack<Transaction<K, V>> stack = transactionStack.get();
+        if (!stack.isEmpty()) {
+            stack.peek().getChanges().put(key, value);
         } else {
             store.put(key, value);
         }
@@ -29,11 +39,16 @@ public class KeyValueStore<K, V> {
 
     /**
      * Returns the value for the given key.
-     * Checks active transactions first, then global store.
-     * Returns null if key does not exist.
+     * Checks active transactions first, then the global store.
+     *
+     * Thread Safety:
+     * - Reads from thread-local stack are inherently safe.
+     * - Reads from the synchronized global store are thread-safe.
      */
     public V get(K key) {
-        for (Transaction<K, V> txn : transactionStack) {
+        Stack<Transaction<K, V>> stack = transactionStack.get();
+        for (int i = stack.size() - 1; i >= 0; i--) {
+            Transaction<K, V> txn = stack.get(i);
             if (txn.getChanges().containsKey(key)) {
                 return txn.getChanges().get(key);
             }
@@ -43,22 +58,36 @@ public class KeyValueStore<K, V> {
 
     /**
      * Deletes the given key.
-     * If inside a active transaction, deletion only affects the transaction.
+     * If inside a transaction, deletion only affects the current transaction.
+     * Else delete from global store.
+     *
+     * Thread Safety:
+     * - Thread-local stack requires no synchronization.
+     * - Global store is thread-safe for individual remove() operations.
      */
     public void delete(K key) {
-        if (!transactionStack.empty()) {
-            transactionStack.peek().getChanges().remove(key);
-            return;
+        Stack<Transaction<K, V>> stack = transactionStack.get();
+        if (!stack.isEmpty()) {
+            stack.peek().getChanges().put(key, null);
+        } else {
+            store.remove(key);
         }
-        store.remove(key);
     }
 
     /**
-     * Returns a list of all unique keys present, including keys in active transactions.
+     * Returns a list of all unique keys, including thread-local transaction changes.
+     *
+     * Thread Safety:
+     * - Accessing the global store is synchronized to create a consistent snapshot.
+     * - Thread-local changes are inherently safe.
      */
     public List<K> keys() {
-        Set<K> keysSet = new HashSet<>(store.keySet());
-        for (Transaction<K, V> txn : transactionStack) {
+        Set<K> keysSet;
+        synchronized (store) {
+            keysSet = new HashSet<>(store.keySet());
+        }
+        Stack<Transaction<K, V>> stack = transactionStack.get();
+        for (Transaction<K, V> txn : stack) {
             keysSet.addAll(txn.getChanges().keySet());
         }
         return new ArrayList<>(keysSet);
@@ -67,36 +96,49 @@ public class KeyValueStore<K, V> {
     // ---------------- Transaction Operations ----------------
 
     /**
-     * Begins a new transaction.
+     * Begins a new transaction for the current thread.
+     *
+     * Thread Safety:
+     * - Transaction stack is thread-local, no synchronization needed.
      */
     public void begin() {
-        Transaction<K, V> txn = new Transaction<>();
-        transactionStack.add(txn);
+        Stack<Transaction<K, V>> stack = transactionStack.get();
+        stack.push(new Transaction<>());
     }
 
     /**
-     * Rolls back the most recent active transaction.
-     * If no transaction is active, does nothing.
+     * Rolls back the most recent active transaction for the current thread.
+     *
+     * Thread Safety:
+     * - Transaction stack is thread-local, no synchronization needed.
      */
     public void rollback() {
-        if (!transactionStack.empty()) {
-            transactionStack.pop();
-        }
+        Stack<Transaction<K, V>> stack = transactionStack.get();
+        if (!stack.isEmpty()) stack.pop();
     }
 
     /**
-     * Commits the most recent active transaction.
-     * If nested, merges into parent transaction.
-     * If outermost, applies changes to the global store.
+     * Commits the most recent active transaction for the current thread.
+     * If nested, merges into parent transaction. If outermost, applies changes to the global store.
+     *
+     * Thread Safety:
+     * - Thread-local stack operations are safe.
+     * - Global store putAll() is synchronized to ensure the entire transaction commit happens atomically,
+     *   preventing interleaving of updates from multiple threads.
      */
     public void commit() {
-        if (!transactionStack.empty()) {
-            Transaction<K, V> mostRecentActiveTransaction = transactionStack.pop();
+        Stack<Transaction<K, V>> stack = transactionStack.get();
+        if (stack.isEmpty()) return;
 
-            if (!transactionStack.empty()) {
-                transactionStack.peek().getChanges().putAll(mostRecentActiveTransaction.getChanges());
-            } else {
-                store.putAll(mostRecentActiveTransaction.getChanges());
+        Transaction<K, V> top = stack.pop();
+
+        if (!stack.isEmpty()) {
+            // Merge into parent transaction
+            stack.peek().getChanges().putAll(top.getChanges());
+        } else {
+            // Apply to global store atomically
+            synchronized (store) {
+                store.putAll(top.getChanges());
             }
         }
     }
