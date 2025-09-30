@@ -1,4 +1,3 @@
-/**
  Problem Statement: Transactional In-Memory Key/Value Store
 
  We have to build an in-memory key-value store that supports basic operations and,
@@ -53,5 +52,3 @@
  3.2 Ensure correctness of transactions when multiple threads operate simultaneously.
 
  3.3 Prevent race conditions and maintain data consistency.
- *
- * */

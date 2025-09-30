@@ -1,4 +1,4 @@
-package org.example;
+package org.keyvaluestore;
 
 import java.util.HashMap;
 import java.util.Map;
